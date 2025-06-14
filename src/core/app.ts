@@ -9,7 +9,6 @@ import { ZodType } from 'zod';
 export class Qera {
   private app: TemplatedApp;
   private middlewares: Middleware[] = [];
-  private logger: Logger;
   private config: QeraConfig = {};
   private routes: Map<string, Map<string, RouteHandler>> = new Map();
   private wsHandlers: Map<string, WebSocketHandler> = new Map();
@@ -28,7 +27,8 @@ export class Qera {
       ...config
     };
 
-    this.logger = new Logger(this.config.logging);
+    // Configure the singleton logger
+    Logger.configure(this.config.logging);
     
     // Initialize the app with SSL if provided
     if (this.config.ssl) {
@@ -393,7 +393,7 @@ export class Qera {
       
       await next();
     } catch (error) {
-      this.logger.error(`Error handling request: ${error}`);
+      Logger.error(`Error handling request: ${error}`);
       
       // Only send response if it hasn't been sent yet
       if (!res.aborted) {
@@ -471,9 +471,9 @@ export class Qera {
 
     this.app.listen(host, port, (listenSocket) => {
       if (listenSocket) {
-        this.logger.info(`Server listening on http://${host}:${port}`);
+        Logger.info(`Server listening on http://${host}:${port}`);
       } else {
-        this.logger.error(`Failed to listen on port ${port}`);
+        Logger.error(`Failed to listen on port ${port}`);
       }
     });
   }

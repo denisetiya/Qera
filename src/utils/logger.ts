@@ -8,12 +8,13 @@ interface LoggerConfig {
 }
 
 export class Logger {
-  private level: string;
-  private format: string;
-  private output: string;
+  private static instance: Logger;
+  public level: string;
+  public format: string;
+  public output: string;
   private logStream: fs.WriteStream | null = null;
   
-  private levelPriority: Record<string, number> = {
+  private static levelPriority: Record<string, number> = {
     debug: 0,
     info: 1,
     warn: 2,
@@ -38,25 +39,76 @@ export class Logger {
     }
   }
 
-  debug(message: string, meta: Record<string, any> = {}): void {
+  private static getInstance(): Logger {
+    if (!Logger.instance) {
+      Logger.instance = new Logger();
+    }
+    return Logger.instance;
+  }
+  
+  /**
+   * Configure the logger settings
+   */
+  public static configure(config: LoggerConfig = {}): void {
+    const instance = Logger.getInstance();
+    instance.level = config.level || 'info';
+    instance.format = config.format || 'pretty';
+    instance.output = config.output || 'console';
+    
+    // Close existing stream if any
+    if (instance.logStream) {
+      instance.logStream.end();
+      instance.logStream = null;
+    }
+    
+    // Set up file stream if output is a file path
+    if (instance.output !== 'console') {
+      const logDir = path.dirname(instance.output);
+      
+      // Ensure the directory exists
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      
+      instance.logStream = fs.createWriteStream(instance.output, { flags: 'a' });
+    }
+  }
+
+  public static debug(message: string, meta: Record<string, any> = {}): void {
+    Logger.getInstance().log('debug', message, meta);
+  }
+
+  public static info(message: string, meta: Record<string, any> = {}): void {
+    Logger.getInstance().log('info', message, meta);
+  }
+
+  public static warn(message: string, meta: Record<string, any> = {}): void {
+    Logger.getInstance().log('warn', message, meta);
+  }
+
+  public static error(message: string, meta: Record<string, any> = {}): void {
+    Logger.getInstance().log('error', message, meta);
+  }
+
+  public debug(message: string, meta: Record<string, any> = {}): void {
     this.log('debug', message, meta);
   }
 
-  info(message: string, meta: Record<string, any> = {}): void {
+  public info(message: string, meta: Record<string, any> = {}): void {
     this.log('info', message, meta);
   }
 
-  warn(message: string, meta: Record<string, any> = {}): void {
+  public warn(message: string, meta: Record<string, any> = {}): void {
     this.log('warn', message, meta);
   }
 
-  error(message: string, meta: Record<string, any> = {}): void {
+  public error(message: string, meta: Record<string, any> = {}): void {
     this.log('error', message, meta);
   }
 
   private log(level: string, message: string, meta: Record<string, any> = {}): void {
     // Check if this log level should be emitted
-    if (this.levelPriority[level] < this.levelPriority[this.level]) {
+    if (Logger.levelPriority[level] < Logger.levelPriority[this.level]) {
       return;
     }
     
@@ -107,7 +159,16 @@ export class Logger {
   }
 
   // Clean up resources when done
-  close(): void {
+  public static close(): void {
+    const instance = Logger.getInstance();
+    if (instance.logStream) {
+      instance.logStream.end();
+      instance.logStream = null;
+    }
+  }
+  
+  // Instance method for closing resources
+  public close(): void {
     if (this.logStream) {
       this.logStream.end();
       this.logStream = null;

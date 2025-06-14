@@ -39,13 +39,13 @@ import Qera from 'qera';
 
 const app = new Qera();
 
-app.get('/', (ctx) => {
-  ctx.json({ message: 'Hello, world!' });
+app.get('/', (qera) => {
+  qera.json({ message: 'Hello, world!' });
 });
 
-app.post('/login', (ctx) => {
-  const body = ctx.body;
-  ctx.json({ welcome: body.username });
+app.post('/login', (qera) => {
+  const body = qera.body;
+  qera.json({ welcome: body.username });
 });
 
 app.listen(3000);
@@ -128,16 +128,16 @@ app.put('/users/:id', usersController.update);
 app.delete('/users/:id', usersController.delete);
 
 // Route with validation
-app.post('/register', (ctx) => {
+app.post('/register', (qera) => {
   const schema = z.object({
     username: z.string().min(3),
     email: z.string().email(),
     password: z.string().min(8)
   });
   
-  const data = ctx.validate(schema);
+  const data = qera.validate(schema);
   // Valid data guaranteed here
-  ctx.json({ message: 'User registered', user: data });
+  qera.json({ message: 'User registered', user: data });
 });
 ```
 
@@ -145,16 +145,16 @@ app.post('/register', (ctx) => {
 
 ```typescript
 // Global middleware
-app.use(async (ctx, next) => {
+app.use(async (qera, next) => {
   const start = Date.now();
   await next();
   const ms = Date.now() - start;
-  console.log(`${ctx.req.getMethod()} ${ctx.req.getUrl()} - ${ms}ms`);
+  console.log(`${qera.req.getMethod()} ${qera.req.getUrl()} - ${ms}ms`);
 });
 
 // Route-specific middleware
-app.get('/admin', jwtAuth({ secret: 'your-secret' }), (ctx) => {
-  ctx.json({ message: 'Admin area', user: ctx.user });
+app.get('/admin', jwtAuth({ secret: 'your-secret' }), (qera) => {
+  qera.json({ message: 'Admin area', user: qera.user });
 });
 ```
 
@@ -162,21 +162,21 @@ app.get('/admin', jwtAuth({ secret: 'your-secret' }), (ctx) => {
 
 ```typescript
 app.ws('/chat', {
-  open: (ctx) => {
-    ctx.subscribe('chatroom');
-    ctx.send(JSON.stringify({ event: 'welcome' }));
+  open: (qera) => {
+    qera.subscribe('chatroom');
+    qera.send(JSON.stringify({ event: 'welcome' }));
   },
   
-  message: (ctx, message, isBinary) => {
+  message: (qera, message, isBinary) => {
     const data = JSON.parse(Buffer.from(message).toString());
-    ctx.publish('chatroom', JSON.stringify({
+    qera.publish('chatroom', JSON.stringify({
       user: data.user,
       message: data.message
     }));
   },
   
-  close: (ctx) => {
-    ctx.unsubscribe('chatroom');
+  close: (qera) => {
+    qera.unsubscribe('chatroom');
   }
 });
 ```
@@ -207,8 +207,7 @@ Framework    | Requests/sec | Latency (ms) | Throughput (MB/s)
 -------------|--------------|--------------|------------------
 qera         | 45612        | 2.15         | 8.75             
 express      | 28374        | 3.47         | 5.42             
-fastify      | 39128        | 2.51         | 7.31             
-hyper-express| 47835        | 1.98         | 8.94             
+fastify      | 39128        | 2.51         | 7.31                        
 go-http      | 52398        | 1.87         | 9.72             
 go-fasthttp  | 68754        | 1.43         | 12.54            
 ```
@@ -221,28 +220,28 @@ See [Benchmarks Documentation](docs/benchmarks.md) for more details.
 
 ```typescript
 // Create JWT token
-app.post('/login', (ctx) => {
-  const { username, password } = ctx.body;
+app.post('/login', (qera) => {
+  const { username, password } = qera.body;
   
   // Validate credentials...
   
-  const token = ctx.signJwt({ 
+  const token = qera.signJwt({ 
     username,
     role: 'user'
   });
   
-  ctx.json({ token });
+  qera.json({ token });
 });
 
 // Verify JWT token
-app.get('/protected', (ctx) => {
+app.get('/protected', (qera) => {
   try {
-    const token = ctx.headers.authorization.split(' ')[1];
-    const user = ctx.verifyJwt(token);
+    const token = qera.headers.authorization.split(' ')[1];
+    const user = qera.verifyJwt(token);
     
-    ctx.json({ message: 'Protected data', user });
+    qera.json({ message: 'Protected data', user });
   } catch (error) {
-    ctx.status(401).json({ error: 'Unauthorized' });
+    qera.status(401).json({ error: 'Unauthorized' });
   }
 });
 ```
@@ -260,22 +259,22 @@ app.use(session({
 }));
 
 // Set session data
-app.post('/login', (ctx) => {
-  const { username, password } = ctx.body;
+app.post('/login', (qera) => {
+  const { username, password } = qera.body;
   
   // Validate credentials...
   
-  ctx.session.user = { username, role: 'user' };
-  ctx.json({ message: 'Logged in' });
+  qera.session.user = { username, role: 'user' };
+  qera.json({ message: 'Logged in' });
 });
 
 // Access session data
-app.get('/profile', (ctx) => {
-  if (!ctx.session.user) {
-    return ctx.status(401).json({ error: 'Not logged in' });
+app.get('/profile', (qera) => {
+  if (!qera.session.user) {
+    return qera.status(401).json({ error: 'Not logged in' });
   }
   
-  ctx.json({ user: ctx.session.user });
+  qera.json({ user: qera.session.user });
 });
 ```
 
@@ -286,7 +285,7 @@ Qera uses Zod for schema validation:
 ```typescript
 import { z } from 'zod';
 
-app.post('/users', (ctx) => {
+app.post('/users', (qera) => {
   const userSchema = z.object({
     name: z.string().min(2).max(100),
     email: z.string().email(),
@@ -294,11 +293,42 @@ app.post('/users', (ctx) => {
   });
   
   // Validate data
-  const user = ctx.validate(userSchema);
+  const user = qera.validate(userSchema);
   
   // Data is valid if we get here
-  ctx.json({ message: 'User created', user });
+  qera.json({ message: 'User created', user });
 });
+```
+
+## Logging
+
+Qera provides a built-in Logger that can be used across your application without creating instances:
+
+```typescript
+import { Logger } from 'qera';
+
+// Basic usage with different log levels
+Logger.info('Server started');
+Logger.warn('Deprecated feature used');
+Logger.error('Failed to connect to database', { dbHost: 'localhost' });
+Logger.debug('Request details', { method: 'GET', path: '/users' });
+
+// Configure logger settings
+Logger.configure({
+  level: 'debug',      // 'debug' | 'info' | 'warn' | 'error'
+  format: 'pretty',    // 'pretty' | 'json'
+  output: './logs/app.log'  // 'console' or file path
+});
+
+// Log with metadata
+Logger.info('User action', { 
+  userId: 123, 
+  action: 'login', 
+  timestamp: new Date()
+});
+
+// Clean up resources (important if using file output)
+Logger.close();
 ```
 
 ## License

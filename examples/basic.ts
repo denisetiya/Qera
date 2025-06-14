@@ -1,5 +1,9 @@
-import Qera from '../src';
+import Qera, { Logger } from '../src';
 import { z } from 'zod';
+
+// Example of directly using Logger
+Logger.info('Application starting up');
+
 
 const app = Qera({
   logging: {
@@ -43,97 +47,117 @@ const loginSchema = z.object({
   password: z.string().min(6),
 });
 
-app.use(async (ctx, next) => {
-  console.log(`Request received: ${ctx.req.getMethod()} ${ctx.req.getUrl()}`);
+app.use(async (qera, next) => {
+  Logger.debug(`Request received: ${qera.req.getMethod()} ${qera.req.getUrl()}`);
+  
+  // Record start time for request duration
+  const startTime = Date.now();
+  
   await next();
-  console.log(`Response sent with status: ${ctx.statusCode}`);
+  
+  // Calculate request duration
+  const duration = Date.now() - startTime;
+  Logger.info(`Response sent with status: ${qera.statusCode}`, { 
+    method: qera.req.getMethod(),
+    url: qera.req.getUrl(),
+    status: qera.statusCode,
+    duration: `${duration}ms`
+  });
 });
 
-app.get('/', (ctx) => {
-  ctx.json({ message: 'Welcome to Qera framework!' });
+app.get('/', (qera) => {
+  qera.json({ message: 'Welcome to Qera framework!' });
 });
 
 // Route with parameters
-app.get('/users/:id', (ctx) => {
-  const { id } = ctx.params;
-  ctx.json({ message: `User details for ID: ${id}` });
+app.get('/users/:id', (qera) => {
+  const { id } = qera.params;
+  qera.json({ message: `User details for ID: ${id}` });
 });
 
-app.get('/search', (ctx) => {
-  const { query } = ctx.query;
-  ctx.json({ message: `Search results for: ${query}` });
+app.get('/search', (qera) => {
+  const { query } = qera.query;
+  qera.json({ message: `Search results for: ${query}` });
 });
 
 // Route with validation
-app.post('/login', (ctx) => {
+app.post('/login', (qera) => {
   try {
     // Validate request body
-    const data = ctx.validate(loginSchema);
+    const data = qera.validate(loginSchema);
+    
+    Logger.info(`User logged in: ${data.username}`);
     
     // Generate JWT token
-    const token = ctx.signJwt({ username: data.username });
+    const token = qera.signJwt({ username: data.username });
     
     // Set cookie
-    ctx.cookie('auth', token, {
+    qera.cookie('auth', token, {
       httpOnly: true,
       maxAge: 3600000 // 1 hour
     });
     
-    ctx.json({ 
+    qera.json({ 
       message: 'Login successful',
       token
     });
   } catch (error) {
-    // Validation error already handled by ctx.validate
-    console.error('Login error:', error);
+    // Validation error already handled by qera.validate
+    Logger.error('Login error', { 
+      error: error.message,
+      username: qera.body?.username 
+    });
   }
 });
 
 // Protected route with JWT authentication
-app.get('/profile', (ctx) => {
+app.get('/profile', (qera) => {
   try {
     // Get token from request header
-    const authHeader = ctx.headers.authorization;
+    const authHeader = qera.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return ctx.status(401).json({ error: 'Authentication required' });
+      return qera.status(401).json({ error: 'Authentication required' });
     }
     
     // Verify token
     const token = authHeader.substring(7);
-    const user = ctx.verifyJwt(token);
+    const user = qera.verifyJwt(token);
     
-    ctx.json({
+    qera.json({
       message: 'Profile data',
       user
     });
   } catch (error) {
-    ctx.status(401).json({ error: 'Invalid or expired token' });
+    qera.status(401).json({ error: 'Invalid or expired token' });
   }
 });
 
 // WebSocket support
 app.ws('/chat', {
-  open: (ctx) => {
-    console.log('WebSocket connection opened');
-    ctx.subscribe('global');
-    ctx.send(JSON.stringify({ event: 'welcome', message: 'Welcome to the chat!' }));
+  open: (qera) => {
+    Logger.info('WebSocket connection opened');
+    qera.subscribe('global');
+    qera.send(JSON.stringify({ event: 'welcome', message: 'Welcome to the chat!' }));
   },
-  message: (ctx, message) => {
+  message: (qera, message) => {
     const data = JSON.parse(Buffer.from(message).toString());
-    console.log('Message received:', data);
+    Logger.debug('WebSocket message received', { data });
     
     // Broadcast message to all subscribers of 'global' topic
-    ctx.publish('global', JSON.stringify({
+    qera.publish('global', JSON.stringify({
       event: 'message',
       username: data.username || 'Anonymous',
       text: data.text
     }));
   },
-  close: (ctx) => {
-    console.log('WebSocket connection closed');
-    ctx.unsubscribe('global');
+  close: (qera) => {
+    Logger.info('WebSocket connection closed');
+    qera.unsubscribe('global');
   }
 });
 
 // Start the server
-app.listen(8080, 'localhost');
+const PORT = 8080;
+const HOST = 'localhost';
+app.listen(PORT, HOST);
+Logger.info(`Server started`, { port: PORT, host: HOST });
