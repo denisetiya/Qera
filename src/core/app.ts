@@ -4,7 +4,7 @@ import { parseBody } from '../utils/bodyParser';
 import { parseCookies } from '../utils/cookieParser';
 import { parseUrl } from '../utils/urlParser';
 import { Logger } from '../utils/logger';
-import { ZodType } from 'zod';
+import { QeraSchema } from '../utils/validator';
 
 export class Qera {
   private app: TemplatedApp;
@@ -250,10 +250,11 @@ export class Qera {
         return ctx;
       },
       json: (data) => {
-        // Default status code is 200 if not explicitly set
-        if (statusCode === 0) {
-          statusCode = 200;
+        // Use the current status code, default to 200 if still unset
+        if (statusCode === 200) {
           res.writeStatus('200 OK');
+        } else {
+          res.writeStatus(statusCode.toString());
         }
         res.writeHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(data));
@@ -290,16 +291,21 @@ export class Qera {
       },
 
       // Utility methods
-      validate: function<T>(schema: ZodType<T>): T {
+      validate: function<T>(schema: QeraSchema<T>): T {
         const result = schema.safeParse(this.body);
         if (!result.success) {
-          this.status(400).json({
-            error: 'Validation error',
-            details: result.error.format()
-          });
-          throw new Error('Validation failed');
+          const { QeraValidationError } = require('../utils/validator');
+          throw new QeraValidationError(result.error!.issues);
         }
-        return result.data;
+        return result.data!;
+      },
+      validateQuery: function<T>(schema: QeraSchema<T>): T {
+        const result = schema.safeParse(this.query);
+        if (!result.success) {
+          const { QeraValidationError } = require('../utils/validator');
+          throw new QeraValidationError(result.error!.issues);
+        }
+        return result.data!;
       },
       encrypt: (data) => {
         if (!this.config.encryption?.secret) {

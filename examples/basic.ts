@@ -1,4 +1,5 @@
 import Qera, { Logger } from '../src';
+import { v } from '../dist';
 import { z } from 'zod';
 
 // Example of directly using Logger
@@ -42,9 +43,9 @@ const app = Qera({
   }
 });
 
-const loginSchema = z.object({
-  username: z.string().min(3).max(50),
-  password: z.string().min(6),
+const loginSchema = v.object({
+  username: v.string().min(3).max(50),
+  password: v.string().min(6),
 });
 
 app.use(async (qera, next) => {
@@ -84,7 +85,7 @@ app.get('/search', (qera) => {
 app.post('/login', (qera) => {
   try {
     // Validate request body
-    const data = qera.validate(loginSchema);
+    const data = qera.validate(loginSchema)
     
     Logger.info(`User logged in: ${data.username}`);
     

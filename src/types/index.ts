@@ -1,5 +1,5 @@
 import { HttpRequest, HttpResponse, WebSocket } from "uWebSockets.js";
-import { ZodType } from "zod";
+import { QeraSchema } from "../utils/validator";
 
 // Core request context types
 export interface QeraContext {
@@ -27,7 +27,8 @@ export interface QeraContext {
   clearCookie(name: string, options?: CookieOptions): QeraContext;
   
   // Utility methods
-  validate<T>(schema: ZodType<T>): T;
+  validate<T>(schema: QeraSchema<T>): T;
+  validateQuery<T>(schema: QeraSchema<T>): T;
   encrypt(data: string): string;
   decrypt(data: string): string;
   signJwt(payload: any, options?: JwtOptions): string;
