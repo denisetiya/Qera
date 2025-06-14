@@ -1,0 +1,65 @@
+{
+  "name": "qera",
+  "version": "0.1.1-a",
+  "description": "High-performance REST API framework powered by uWebSockets.js with minimal dependencies",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn --transpile-only examples/basic.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{js,ts}\"",
+    "prepare": "pnpm build",
+    "cli": "ts-node src/cli/index.ts",
+    "benchmark": "node benchmark/benchmark.js",
+    "benchmark:compare": "node --unhandled-rejections=strict benchmark/compare.js",
+    "serve": "ts-node src/cli/index.ts serve"
+  },
+  "keywords": [
+    "api",
+    "framework",
+    "rest",
+    "websocket",
+    "http",
+    "high-performance",
+    "uWebSockets"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cookie": "^0.6.0",
+    "dotenv": "^16.3.1",
+    "jsonwebtoken": "^9.0.2",
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.52.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cookie": "^0.5.4",
+    "@types/jest": "^29.5.8",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.10.0",
+    "@types/supertest": "^2.0.16",
+    "autocannon": "^7.11.0",
+    "chokidar": "^3.5.3",
+    "express": "^4.18.2",
+    "fastify": "^4.25.2",
+    "hyper-express": "^6.17.3",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "tree-kill": "^1.2.2",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "bin": {
+    "qera": "./dist/cli/index.js"
+  },
+  "packageManager": "pnpm@10.12.1+sha512.f0dda8580f0ee9481c5c79a1d927b9164f2c478e90992ad268bbb2465a736984391d6333d2c327913578b2804af33474ca554ba29c04a8b13060a717675ae3ac"
+}

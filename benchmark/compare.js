@@ -1,0 +1,487 @@
+const autocannon = require('autocannon');
+const { fork } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// The frameworks to compare
+const frameworks = [
+  { name: 'qera', port: 3000, script: path.join(__dirname, 'servers/qera-server.js') },
+  { name: 'express', port: 3001, script: path.join(__dirname, 'servers/express-server.js') },
+  { name: 'fastify', port: 3002, script: path.join(__dirname, 'servers/fastify-server.js') },
+];
+
+// Add Go implementations to benchmarks if not specifically skipped
+if (process.env.SKIP_GO_BENCHMARK !== 'true') {
+  frameworks.push(
+    { name: 'go-http', port: 3003, isGoServer: true, goFile: path.join(__dirname, 'servers/go-simple-server.go') },
+    { name: 'go-fasthttp', port: 3004, isGoServer: true, goFile: path.join(__dirname, 'servers/go-simple-fasthttp.go') }
+  );
+}
+
+// Ensure servers directory exists
+if (!fs.existsSync(path.join(__dirname, 'servers'))) {
+  fs.mkdirSync(path.join(__dirname, 'servers'));
+}
+
+// Create Express server file
+fs.writeFileSync(path.join(__dirname, 'servers/express-server.js'), `
+try {
+  const express = require('express');
+  const app = express();
+
+  app.use(express.json());
+
+  app.get('/', (req, res) => {
+    res.json({ message: 'Hello, World!' });
+  });
+
+  app.get('/users/:id', (req, res) => {
+    res.json({ id: req.params.id });
+  });
+
+  app.post('/echo', (req, res) => {
+    res.json(req.body);
+  });
+
+  // Error handling middleware
+  app.use((err, req, res, next) => {
+    console.error('Express error:', err);
+    res.status(500).json({ error: 'Server error' });
+  });
+
+  const server = app.listen(3001, () => {
+    console.log('Express server listening on port 3001');
+  });
+
+  // Handle process termination
+  process.on('SIGTERM', () => {
+    server.close(() => {
+      console.log('Express server closed');
+      process.exit(0);
+    });
+  });
+  
+  process.on('SIGINT', () => {
+    server.close(() => {
+      console.log('Express server closed');
+      process.exit(0);
+    });
+  });
+} catch (err) {
+  console.error('Failed to start Express server:', err);
+  process.exit(1);
+}
+`);
+
+// Create Fastify server file
+fs.writeFileSync(path.join(__dirname, 'servers/fastify-server.js'), `
+try {
+  const fastify = require('fastify')({ 
+    logger: false,
+    trustProxy: true,
+    ignoreTrailingSlash: true
+  });
+
+  // Register JSON parser
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
+    try {
+      const json = JSON.parse(body);
+      done(null, json);
+    } catch (err) {
+      err.statusCode = 400;
+      done(err, undefined);
+    }
+  });
+
+  fastify.get('/', async (request, reply) => {
+    return { message: 'Hello, World!' };
+  });
+
+  fastify.get('/users/:id', async (request, reply) => {
+    return { id: request.params.id };
+  });
+
+  fastify.post('/echo', async (request, reply) => {
+    return request.body;
+  });
+
+  // Error handler
+  fastify.setErrorHandler(function (error, request, reply) {
+    console.error('Fastify error:', error);
+    reply.status(500).send({ error: 'Server error' });
+  });
+
+  // Start the server
+  const start = async () => {
+    try {
+      await fastify.listen({ port: 3002, host: '0.0.0.0' });
+      console.log('Fastify server listening on port 3002');
+      
+      // Handle process termination
+      process.on('SIGTERM', async () => {
+        await fastify.close();
+        console.log('Fastify server closed');
+        process.exit(0);
+      });
+      
+      process.on('SIGINT', async () => {
+        await fastify.close();
+        console.log('Fastify server closed');
+        process.exit(0);
+      });
+    } catch (err) {
+      fastify.log.error(err);
+      process.exit(1);
+    }
+  };
+  
+  start();
+} catch (err) {
+  console.error('Failed to start Fastify server:', err);
+  process.exit(1);
+}
+`);
+
+// Create Qera server file (copy from benchmark-server.js)
+fs.copyFileSync(
+  path.join(__dirname, 'benchmark-server.js'),
+  path.join(__dirname, 'servers/qera-server.js')
+);
+
+// Results storage
+const results = {};
+let currentFrameworkIndex = 0;
+let currentServer = null;
+
+// Server verification is handled inline for now
+
+// Run benchmark against a specific framework
+async function benchmarkFramework(framework) {
+  return new Promise((resolve, reject) => {
+    console.log(`\nStarting ${framework.name} server...`);
+    
+    // Special handling for Go server
+    if (framework.isGoServer) {
+      const { exec } = require('child_process');
+      
+      const goServerPath = framework.goFile || path.join(__dirname, 'servers/go-server.go');
+      
+      // Check if Go server file exists
+      if (!fs.existsSync(goServerPath)) {
+        console.error(`Error: Go server file not found: ${goServerPath}`);
+        resolve(); // Continue with other frameworks
+        return;
+      }
+      
+      // Ensure Go modules are properly set up
+      console.log('Ensuring Go dependencies are available...');
+      try {
+        exec(`cd ${path.dirname(goServerPath)} && go mod tidy`);
+      } catch (err) {
+        // Just log but continue - this step might not be critical
+        console.warn(`Warning while setting up Go modules: ${err.message}`);
+      }
+      
+      // Start Go server
+      try {
+        console.log(`Starting ${framework.name} server with: go run ${goServerPath}`);
+        currentServer = exec(`cd ${path.dirname(goServerPath)} && go run ${path.basename(goServerPath)}`, { 
+          stdio: 'inherit',
+        });
+        
+        // Add a longer delay to allow the Go server to start
+        setTimeout(() => {
+          console.log(`${framework.name} server started on port ${framework.port}`);
+        }, 2000);
+      } catch (err) {
+        console.error(`Error starting Go server:`, err.message);
+        resolve(); // Continue with other frameworks
+        return;
+      }
+    } 
+    // For Node.js servers
+    else {
+      // Check if the script file exists
+      if (!fs.existsSync(framework.script)) {
+        console.error(`Error: Script file not found for ${framework.name}: ${framework.script}`);
+        resolve(); // Continue with other frameworks
+        return;
+      }
+      
+      // Start the server with error handling
+      try {
+        currentServer = fork(framework.script, [], { 
+          stdio: 'inherit',
+          // Add timeout to ensure the process doesn't hang
+          timeout: 10000 
+        });
+      } catch (err) {
+        console.error(`Error starting ${framework.name} server:`, err.message);
+        resolve(); // Continue with other frameworks
+        return;
+      }
+    }
+    
+    // Handle server errors
+    if (!framework.isGoServer) {
+      currentServer.on('error', (err) => {
+        console.error(`Error in ${framework.name} server:`, err);
+        killCurrentServer(framework);
+        currentServer = null;
+        resolve(); // Continue with other frameworks
+      });
+    }
+    
+    // Give the server more time to start
+    const startTimeout = setTimeout(() => {
+      // Verify server with HTTP request instead of just socket connection
+      console.log(`Verifying ${framework.name} server on port ${framework.port}...`);
+      
+      // Function to check if server is responding to HTTP requests
+      const verifyServerWithRequest = () => {
+        const http = require('http');
+        
+        const req = http.request({
+          hostname: 'localhost',
+          port: framework.port,
+          path: '/',
+          method: 'GET',
+          timeout: 5000 // 5 seconds timeout for request
+        }, (res) => {
+          // Read response data to properly end the request
+          let data = '';
+          res.on('data', chunk => { data += chunk; });
+          
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 400) {
+              console.log(`✅ Server ${framework.name} verified as running correctly on port ${framework.port}`);
+              console.log(`Running benchmark against ${framework.name}...`);
+              runBenchmark();
+            } else {
+              console.error(`⚠️ Server ${framework.name} responded with unexpected status code ${res.statusCode}`);
+              console.log(`Attempting to run benchmark anyway...`);
+              runBenchmark();
+            }
+          });
+        });
+        
+        req.on('error', (err) => {
+          console.error(`Error: ${framework.name} server not responding properly on port ${framework.port}: ${err.message}`);
+          
+          // Fall back to checking if port is at least accepting connections
+          console.log(`Falling back to socket connection check...`);
+          checkPortOnly();
+        });
+        
+        req.end();
+      };
+      
+      // Fallback to just checking if the port is open
+      const checkPortOnly = () => {
+        const net = require('net');
+        const checkSocket = net.connect(framework.port, 'localhost');
+        
+        let serverReady = false;
+        
+        checkSocket.on('connect', () => {
+          serverReady = true;
+          checkSocket.end();
+          console.log(`⚠️ Server ${framework.name} is accepting connections on port ${framework.port}, but HTTP verification failed`);
+          console.log(`Attempting to run benchmark anyway...`);
+          runBenchmark();
+        });
+        
+        checkSocket.on('error', (err) => {
+          console.error(`❌ Error: ${framework.name} server not available on port ${framework.port}: ${err.message}`);
+          console.error(`Skipping benchmark for ${framework.name}`);
+          killCurrentServer(framework);
+          currentServer = null;
+          resolve();
+        });
+        
+        // Extra timeout for socket check
+        setTimeout(() => {
+          if (!serverReady) {
+            checkSocket.destroy();
+            console.error(`❌ Timeout waiting for ${framework.name} server to start on port ${framework.port}`);
+            console.error(`Skipping benchmark for ${framework.name}`);
+            killCurrentServer(framework);
+            currentServer = null;
+            resolve();
+          }
+        }, 5000);
+      };
+      
+      // Start verification process
+      verifyServerWithRequest();
+    }, 5000); // Wait 5 seconds before checking server
+    
+    // Helper function to kill server
+    const killCurrentServer = (framework) => {
+      if (!currentServer) return;
+      
+      if (framework.isGoServer) {
+        try { 
+          console.log(`Killing Go server process...`);
+          const treeKill = require('tree-kill');
+          treeKill(currentServer.pid, 'SIGTERM', (err) => {
+            if (err) console.error(`Error killing Go server process: ${err}`);
+          });
+        } catch (e) {
+          console.error(`Error killing Go server: ${e.message}`);
+        }
+      } else {
+        try { 
+          currentServer.kill('SIGTERM'); 
+        } catch (e) {
+          console.error(`Error killing Node.js server: ${e.message}`);
+        }
+      }
+    };
+      
+      // Function to run the actual benchmark
+      const runBenchmark = () => {
+        // Run the benchmark with a timeout
+        let benchmarkTimeout;
+      try {
+        benchmarkTimeout = setTimeout(() => {
+          console.error(`Benchmark for ${framework.name} timed out after 30 seconds`);
+          if (currentServer) {
+            if (framework.isGoServer) {
+              try { 
+                require('tree-kill')(currentServer.pid);
+              } catch (e) {
+                console.error(`Error killing Go server: ${e.message}`);
+              }
+            } else {
+              try { currentServer.kill('SIGTERM'); } catch (e) {}
+            }
+          }
+          currentServer = null;
+          resolve(); // Continue with other frameworks
+        }, 30000); // 30 second timeout
+        
+        autocannon({
+          url: `http://localhost:${framework.port}`,
+          connections: 100,
+          pipelining: 1,
+          duration: 10,
+          title: `${framework.name} Benchmark`
+        }, (err, result) => {
+          clearTimeout(benchmarkTimeout);            if (err) {
+            console.error(`Benchmark error for ${framework.name}:`, err.message);
+            if (currentServer) {
+              if (framework.isGoServer) {
+                try { 
+                  require('tree-kill')(currentServer.pid);
+                } catch (e) {
+                  console.error(`Error killing Go server: ${e.message}`);
+                }
+              } else {
+                try { currentServer.kill('SIGTERM'); } catch (e) {}
+              }
+            }
+            currentServer = null;
+            resolve(); // Continue with other frameworks
+            return;
+          }
+          
+          // Store results
+          results[framework.name] = {
+            requests: Math.round(result.requests.average),
+            latency: result.latency.average.toFixed(2),
+            throughput: (result.throughput.average / 1024 / 1024).toFixed(2)
+          };
+          
+          console.log(`${framework.name} benchmark completed.`);
+          
+          // Kill the server
+          if (currentServer) {
+            if (framework.isGoServer) {
+              try { 
+                require('tree-kill')(currentServer.pid);
+              } catch (e) {
+                console.error(`Error killing Go server: ${e.message}`);
+              }
+            } else {
+              try { currentServer.kill('SIGTERM'); } catch (e) {}
+            }
+          }
+          currentServer = null;
+          
+          resolve();
+        });
+      } catch (err) {
+        clearTimeout(benchmarkTimeout);
+        console.error(`Error running benchmark for ${framework.name}:`, err.message);
+        if (currentServer) {
+          if (framework.isGoServer) {
+            try { 
+              require('tree-kill')(currentServer.pid);
+            } catch (e) {
+              console.error(`Error killing Go server: ${e.message}`);
+            }
+          } else {
+            try { currentServer.kill('SIGTERM'); } catch (e) {}
+          }
+        }
+        currentServer = null;
+        resolve(); // Continue with other frameworks
+      }
+    }
+    
+    // Handle server startup timeout for Node.js servers
+    if (!framework.isGoServer) {
+      currentServer.on('close', (code) => {
+        if (code !== 0 && code !== null) {
+          console.error(`${framework.name} server exited with code ${code}`);
+          clearTimeout(startTimeout);
+          currentServer = null;
+          resolve(); // Continue with other frameworks
+        }
+      });
+    }
+  });
+}
+
+// Run all benchmarks in sequence
+async function runAllBenchmarks() {
+  for (const framework of frameworks) {
+    try {
+      await benchmarkFramework(framework);
+    } catch (err) {
+      console.error(`Failed to benchmark ${framework.name}:`, err);
+    }
+  }
+  
+  // Print results
+  console.log('\n\nBenchmark Results:\n');
+  console.log('Framework    | Requests/sec | Latency (ms) | Throughput (MB/s)');
+  console.log('-------------|--------------|--------------|------------------');
+  
+  for (const framework of frameworks) {
+    const result = results[framework.name] || { requests: 'N/A', latency: 'N/A', throughput: 'N/A' };
+    console.log(
+      `${framework.name.padEnd(12)} | ` +
+      `${String(result.requests).padEnd(12)} | ` +
+      `${String(result.latency).padEnd(12)} | ` +
+      `${String(result.throughput).padEnd(18)}`
+    );
+  }
+  
+  console.log('\nBenchmark complete!');
+}
+
+// Handle exit
+process.on('SIGINT', () => {
+  console.log('\nShutting down...');
+  if (currentServer) {
+    currentServer.kill();
+  }
+  process.exit();
+});
+
+// Dependencies are already included in package.json
+
+// Run the benchmarks
+runAllBenchmarks();
